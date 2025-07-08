@@ -1,0 +1,1 @@
+{"name": "jpg-to-webp-backend", "version": "1.0.0", "main": "server.js", "dependencies": {"express": "^4.18.2", "cors": "^2.8.5", "axios": "^1.6.0", "sharp": "^0.32.6", "jszip": "^3.10.1"}}
