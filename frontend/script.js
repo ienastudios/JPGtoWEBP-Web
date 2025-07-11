@@ -245,16 +245,16 @@ class JPGtoWEBPConverter {
         }
 
         this.goToStep(3);
-        this.updateProgress(0, 'Inizializzazione conversione...');
+        this.updateProgress(0, 'Inizializzazione conversione multipla...');
 
         const quality = parseInt(document.getElementById('quality').value);
         const maxSide = parseInt(document.getElementById('maxSide').value);
 
         try {
-            console.log('🚀 Avvio conversione...');
+            console.log('🚀 Avvio conversione multipla...');
             
-            // Avvia la conversione (non aspettiamo la risposta)
-            const conversionPromise = fetch(`${this.baseUrl}/convert-and-download`, {
+            // Avvia la conversione multipla
+            const conversionPromise = fetch(`${this.baseUrl}/convert-multiple-zip`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -275,16 +275,23 @@ class JPGtoWEBPConverter {
                     console.log('📊 Progresso ricevuto:', progressData);
                     
                     if (progressData.isConverting) {
-                        // Aggiorna UI con dati dettagliati
+                        // Aggiorna UI con dati dettagliati per conversione multipla
                         let detailText = progressData.currentAction;
+                        
+                        if (progressData.totalZips > 0) {
+                            detailText += ` (ZIP ${progressData.processedZips + 1}/${progressData.totalZips})`;
+                        }
+                        
                         if (progressData.currentFile) {
                             detailText += ` - ${progressData.currentFile}`;
                         }
+                        
                         if (progressData.currentFolder) {
                             detailText += ` in ${progressData.currentFolder}`;
                         }
+                        
                         if (progressData.processedFiles > 0) {
-                            detailText += ` (${progressData.processedFiles}/${progressData.totalFiles})`;
+                            detailText += ` (${progressData.processedFiles}/${progressData.totalFiles} immagini)`;
                         }
                         
                         this.updateProgress(progressData.progress, detailText);
@@ -303,26 +310,99 @@ class JPGtoWEBPConverter {
             clearInterval(progressInterval);
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Errore durante la conversione');
+                const errorText = await response.text();
+                console.error('💥 Errore risposta server:', errorText);
+                throw new Error('Errore durante la conversione multipla');
             }
 
-            // Gestisci download
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const downloadBtn = document.getElementById('downloadBtn');
-            
-            downloadBtn.href = url;
-            downloadBtn.download = `converted_images_${Date.now()}.zip`;
-            
-            document.getElementById('downloadSection').style.display = 'block';
-            this.updateProgress(100, 'Conversione completata con successo!');
-            this.showAlert('Conversione completata con successo!', 'success');
+            const result = await response.json();
+            console.log('✅ Conversione multipla completata:', result);
+
+            this.updateProgress(100, 'Conversione completata!');
+            this.showMultipleDownloads(result.zipFiles);
 
         } catch (error) {
             console.error('💥 Errore conversione:', error);
             this.showAlert(this.getErrorMessage(error), 'error');
         }
+    }
+
+    showMultipleDownloads(zipFiles) {
+        const downloadSection = document.getElementById('downloadSection');
+        
+        // Crea la lista di download
+        downloadSection.innerHTML = `
+            <h3>📦 File ZIP Disponibili per il Download</h3>
+            <p>La conversione è stata completata con successo! Sono stati creati <strong>${zipFiles.length} file ZIP</strong> separati:</p>
+            <div class="download-list" id="downloadList"></div>
+        `;
+        
+        const downloadList = document.getElementById('downloadList');
+        
+        zipFiles.forEach((zipFile, index) => {
+            const downloadItem = document.createElement('div');
+            downloadItem.className = 'download-item';
+            downloadItem.innerHTML = `
+                <div class="zip-info">
+                    <h4>📁 ${zipFile.name}</h4>
+                    <p>📊 ${zipFile.imageCount} immagini • ${zipFile.sizeFormatted}</p>
+                </div>
+                <button class="btn-primary download-btn" onclick="app.downloadZip('${zipFile.name}')">
+                    📥 Scarica
+                </button>
+            `;
+            downloadList.appendChild(downloadItem);
+        });
+        
+        // Aggiungi bottone per scaricare tutto
+        const downloadAllBtn = document.createElement('button');
+        downloadAllBtn.className = 'btn-secondary download-all-btn';
+        downloadAllBtn.innerHTML = '📦 Scarica Tutti i ZIP';
+        downloadAllBtn.style.marginTop = '20px';
+        downloadAllBtn.onclick = () => this.downloadAllZips(zipFiles);
+        downloadList.appendChild(downloadAllBtn);
+        
+        downloadSection.style.display = 'block';
+        this.showAlert(`Conversione completata! ${zipFiles.length} ZIP creati con successo.`, 'success');
+    }
+
+    async downloadZip(zipName) {
+        try {
+            console.log(`📥 Scaricamento ZIP: ${zipName}`);
+            
+            const response = await fetch(`${this.baseUrl}/download-zip/${encodeURIComponent(zipName)}`);
+            
+            if (!response.ok) {
+                throw new Error('Errore nel download del file');
+            }
+            
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = zipName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(downloadUrl);
+            
+            this.showAlert(`File ${zipName} scaricato con successo!`, 'success');
+            
+        } catch (error) {
+            console.error('💥 Errore nel download:', error);
+            this.showAlert(`Errore nel download di ${zipName}: ${error.message}`, 'error');
+        }
+    }
+
+    async downloadAllZips(zipFiles) {
+        this.showAlert('Avvio download di tutti i ZIP...', 'info');
+        
+        for (let i = 0; i < zipFiles.length; i++) {
+            await new Promise(resolve => setTimeout(resolve, 500)); // Pausa tra download
+            await this.downloadZip(zipFiles[i].name);
+        }
+        
+        this.showAlert('Tutti i ZIP sono stati scaricati!', 'success');
     }
 
 

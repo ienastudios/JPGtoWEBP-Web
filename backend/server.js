@@ -9,15 +9,18 @@ const app = express();
 const PORT = 5001;
 
 // Variabili globali per il progresso della conversione
-let conversionProgress = {
-    isConverting: false,
-    progress: 0,
-    currentFile: '',
-    currentAction: '',
-    totalFiles: 0,
-    processedFiles: 0,
-    currentFolder: ''
-};
+let         conversionProgress = {
+            isConverting: false,
+            progress: 0,
+            currentFile: '',
+            currentAction: '',
+            totalFiles: 0,
+            processedFiles: 0,
+            currentFolder: '',
+            totalZips: 0,
+            processedZips: 0,
+            zipList: []
+        };
 
 app.use(cors());
 app.use(express.json());
@@ -508,6 +511,66 @@ class DriveImageProcessor {
         }
     }
 
+    async createMultipleZips(folderStructure, quality = 80, maxSide = null) {
+        const zipList = [];
+        
+        // Se ci sono immagini nella root, crea un ZIP separato
+        if (folderStructure.images && folderStructure.images.length > 0) {
+            const rootZip = new JSZip();
+            const rootFolder = { images: folderStructure.images, folders: {} };
+            await this.addFolderToZip(rootZip, rootFolder, '', quality, maxSide);
+            
+            const zipBuffer = await rootZip.generateAsync({
+                type: 'nodebuffer',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 6 }
+            });
+            
+            zipList.push({
+                name: 'Root_Images.zip',
+                buffer: zipBuffer,
+                size: zipBuffer.length,
+                imageCount: folderStructure.images.length
+            });
+        }
+        
+        // Crea un ZIP per ogni cartella principale
+        let zipIndex = 0;
+        for (const [folderName, folderData] of Object.entries(folderStructure.folders)) {
+            zipIndex++;
+            console.log(`🗂️ Creando ZIP ${zipIndex}/${conversionProgress.totalZips}: ${folderName}`);
+            
+            conversionProgress.currentAction = `Creando ZIP: ${folderName}`;
+            conversionProgress.currentFolder = folderName;
+            
+            const zip = new JSZip();
+            await this.addFolderToZip(zip, folderData, '', quality, maxSide);
+            
+            const zipBuffer = await zip.generateAsync({
+                type: 'nodebuffer',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 6 }
+            });
+            
+            const imageCount = this.countImages(folderData);
+            const sanitizedName = folderName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            
+            zipList.push({
+                name: `${sanitizedName}.zip`,
+                buffer: zipBuffer,
+                size: zipBuffer.length,
+                imageCount: imageCount
+            });
+            
+            conversionProgress.processedZips++;
+            conversionProgress.progress = Math.round((conversionProgress.processedZips / conversionProgress.totalZips) * 100);
+            
+            console.log(`✅ ZIP creato: ${sanitizedName}.zip (${imageCount} immagini, ${(zipBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+        }
+        
+        return zipList;
+    }
+
     async addFolderToZip(zip, folderData, currentPath, quality, maxSide = null) {
         // Aggiorna cartella corrente
         conversionProgress.currentFolder = currentPath || 'Root';
@@ -662,12 +725,118 @@ app.post('/convert-and-download', async (req, res) => {
     }
 });
 
+// Nuovo endpoint per conversione multipla ZIP (una per cartella principale)
+app.post('/convert-multiple-zip', async (req, res) => {
+    try {
+        const { folderId, quality = 80, maxSide = null } = req.body;
+        
+        if (!folderId) {
+            return res.status(400).json({ error: 'folderId richiesto' });
+        }
+        
+        // Reset progresso per conversione multipla
+        conversionProgress = {
+            isConverting: true,
+            progress: 0,
+            currentFile: '',
+            currentAction: 'Inizializzazione conversione multipla...',
+            totalFiles: 0,
+            processedFiles: 0,
+            currentFolder: '',
+            totalZips: 0,
+            processedZips: 0,
+            zipList: []
+        };
+        
+        console.log(`🔄 Conversione multipla ZIP: ${folderId} (qualità: ${quality}${maxSide ? `, ridimensionamento: ${maxSide}px` : ''})`);
+        
+        // Scansiona struttura
+        conversionProgress.currentAction = 'Scansione struttura cartelle...';
+        const folderStructure = await processor.scanFolderRecursive(folderId);
+        conversionProgress.totalFiles = processor.countImages(folderStructure);
+        
+        // Calcola numero di ZIP da creare
+        conversionProgress.totalZips = Object.keys(folderStructure.folders).length;
+        if (folderStructure.images && folderStructure.images.length > 0) {
+            conversionProgress.totalZips += 1; // ZIP per root images
+        }
+        
+        console.log(`📊 Totale immagini: ${conversionProgress.totalFiles}, ZIP da creare: ${conversionProgress.totalZips}`);
+        
+        // Avvia conversione multipla
+        conversionProgress.currentAction = 'Creazione ZIP multipli...';
+        const zipList = await processor.createMultipleZips(folderStructure, quality, maxSide);
+        
+        conversionProgress.isConverting = false;
+        conversionProgress.progress = 100;
+        conversionProgress.currentAction = 'Conversione completata!';
+        conversionProgress.zipList = zipList;
+        
+        // Restituisce informazioni sui ZIP creati (non i file stessi)
+        const zipInfo = zipList.map(zip => ({
+            name: zip.name,
+            size: zip.size,
+            imageCount: zip.imageCount,
+            sizeFormatted: `${(zip.size / 1024 / 1024).toFixed(2)} MB`
+        }));
+        
+        res.json({
+            success: true,
+            totalZips: zipList.length,
+            totalImages: conversionProgress.totalFiles,
+            zipFiles: zipInfo
+        });
+        
+        console.log(`🎉 Conversione multipla completata! ${zipList.length} ZIP creati.`);
+        
+    } catch (error) {
+        console.error('💥 Errore nella conversione multipla:', error);
+        conversionProgress.isConverting = false;
+        conversionProgress.currentAction = `Errore: ${error.message}`;
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Endpoint per scaricare un singolo ZIP dalla lista
+app.get('/download-zip/:zipName', (req, res) => {
+    try {
+        const { zipName } = req.params;
+        
+        if (!conversionProgress.zipList || conversionProgress.zipList.length === 0) {
+            return res.status(404).json({ error: 'Nessun ZIP disponibile per il download' });
+        }
+        
+        const zipFile = conversionProgress.zipList.find(zip => zip.name === zipName);
+        
+        if (!zipFile) {
+            return res.status(404).json({ error: 'ZIP non trovato' });
+        }
+        
+        console.log(`📥 Download ZIP: ${zipName} (${(zipFile.size / 1024 / 1024).toFixed(2)} MB)`);
+        
+        res.set({
+            'Content-Type': 'application/zip',
+            'Content-Disposition': `attachment; filename="${zipName}"`,
+            'Content-Length': zipFile.size
+        });
+        
+        res.send(zipFile.buffer);
+        
+    } catch (error) {
+        console.error('💥 Errore nel download ZIP:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server Node.js avviato su http://localhost:${PORT}`);
     console.log(`📊 Endpoint disponibili:`);
     console.log(`   GET  /health - Controllo stato`);
+    console.log(`   GET  /convert-progress - Progresso conversione`);
     console.log(`   POST /scan-folder - Scansione cartella`);
-    console.log(`   POST /convert-and-download - Conversione e download`);
+    console.log(`   POST /convert-and-download - Conversione singola ZIP`);
+    console.log(`   POST /convert-multiple-zip - Conversione multipla ZIP`);
+    console.log(`   GET  /download-zip/:zipName - Download ZIP specifico`);
 });
 
 process.on('SIGINT', () => {
