@@ -8,6 +8,17 @@ const path = require('path');
 const app = express();
 const PORT = 5001;
 
+// Variabili globali per il progresso della conversione
+let conversionProgress = {
+    isConverting: false,
+    progress: 0,
+    currentFile: '',
+    currentAction: '',
+    totalFiles: 0,
+    processedFiles: 0,
+    currentFolder: ''
+};
+
 app.use(cors());
 app.use(express.json());
 
@@ -17,6 +28,11 @@ app.use((req, res, next) => {
         req.url = req.url.replace('/api', '');
     }
     next();
+});
+
+// Endpoint per ottenere il progresso della conversione
+app.get('/convert-progress', (req, res) => {
+    res.json(conversionProgress);
 });
 
 class DriveImageProcessor {
@@ -67,15 +83,20 @@ class DriveImageProcessor {
         try {
             // Prova a accedere alla pagina della cartella e cercare link diretti
             const folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
+            console.log(`🌐 Accesso alla pagina: ${folderUrl}`);
+            
             const response = await this.session.get(folderUrl);
             const html = response.data;
             
-            console.log(`Scansionando cartella: ${folderId}`);
+            console.log(`📄 Pagina scaricata: ${html.length} caratteri`);
+            console.log(`🔍 Scansionando cartella: ${folderId}`);
             
             // Estrai il titolo della cartella
             const titleMatch = html.match(/<title>(.*?) - Google Drive<\/title>/);
             if (titleMatch) {
-                console.log(`Cartella trovata: ${titleMatch[1].replace(/&#39;/g, "'")}`);
+                console.log(`📁 Cartella trovata: ${titleMatch[1].replace(/&#39;/g, "'")}`);
+            } else {
+                console.log(`❌ Titolo cartella non trovato`);
             }
             
             const items = [];
@@ -91,38 +112,73 @@ class DriveImageProcessor {
                 /aria-label="([^"]+\.(?:jpg|jpeg|png|gif|bmp|webp))"[^>]*data-id="([^"]+)"/gi
             ];
             
-            // Cerca anche cartelle
+            // Cerca anche cartelle - pattern aggiornati per Google Drive moderno
             const folderPatterns = [
+                // Pattern per cartelle con data-id e icona folder
                 /data-id="([^"]+)"[^>]*>[^<]*<[^>]*class="[^"]*folder[^"]*"[^>]*>([^<]+)/gi,
-                /aria-label="([^"]+)"[^>]*data-id="([^"]+)"[^>]*>[^<]*folder/gi
+                /aria-label="([^"]+)"[^>]*data-id="([^"]+)"[^>]*>[^<]*folder/gi,
+                // Pattern per cartelle con nome e data-id
+                /"([^"]+)","([^"]+)","[^"]*","[^"]*","folder"/g,
+                // Pattern per cartelle nel JSON embeddato
+                /\["([^"]+)","([a-zA-Z0-9-_]+)","[^"]*","[^"]*","application\/vnd\.google-apps\.folder"/g,
+                // Pattern per cartelle con tipo folder
+                /data-id="([a-zA-Z0-9-_]+)"[^>]*data-type="folder"[^>]*>([^<]+)/gi,
+                // Pattern alternativo per cartelle
+                /\["([^"]+)","folder","([a-zA-Z0-9-_]+)"/g
             ];
             
             // Estrai immagini
-            for (const pattern of patterns) {
+            console.log(`🔍 Inizio ricerca immagini con ${patterns.length} pattern...`);
+            for (let i = 0; i < patterns.length; i++) {
+                const pattern = patterns[i];
+                console.log(`🔍 Test pattern ${i + 1}/${patterns.length}: ${pattern}`);
+                
                 let match;
+                let matchCount = 0;
                 while ((match = pattern.exec(html)) !== null) {
+                    matchCount++;
                     const [, id, name] = match;
                     if (id && name && !items.find(item => item.id === id)) {
                         const ext = name.toLowerCase().split('.').pop();
                         const mimeType = this.getMimeType(ext);
                         
-                        items.push({
+                                        items.push({
                             id: id,
                             name: name.trim(),
-                            type: 'image',
+                                            type: 'image',
                             mimeType: mimeType
-                        });
+                                        });
                         
-                        console.log(`Trovata immagine: ${name} (ID: ${id})`);
+                        console.log(`✅ Trovata immagine: ${name} (ID: ${id})`);
                     }
                 }
+                console.log(`📊 Pattern ${i + 1} ha trovato ${matchCount} match`);
             }
             
             // Estrai cartelle
-            for (const pattern of folderPatterns) {
+            console.log(`🔍 Inizio ricerca cartelle con ${folderPatterns.length} pattern...`);
+            for (let i = 0; i < folderPatterns.length; i++) {
+                const pattern = folderPatterns[i];
+                console.log(`🔍 Test pattern cartelle ${i + 1}/${folderPatterns.length}: ${pattern}`);
+                
                 let match;
+                let matchCount = 0;
                 while ((match = pattern.exec(html)) !== null) {
-                    const [, id, name] = match;
+                    matchCount++;
+                    const [, first, second] = match;
+                    
+                    // Determina quale è l'ID e quale è il nome basandosi sul pattern
+                    let id, name;
+                    if (i === 2 || i === 3) {
+                        // Pattern 3 and 4: nome viene prima dell'ID
+                        name = first;
+                        id = second;
+                    } else {
+                        // Pattern 1, 2, 5, 6: ID viene prima del nome
+                        id = first;
+                        name = second;
+                    }
+                    
                     if (id && name && !items.find(item => item.id === id)) {
                         items.push({
                             id: id,
@@ -131,40 +187,141 @@ class DriveImageProcessor {
                             mimeType: 'application/vnd.google-apps.folder'
                         });
                         
-                        console.log(`Trovata cartella: ${name} (ID: ${id})`);
+                        console.log(`✅ Trovata cartella: ${name} (ID: ${id})`);
                     }
                 }
+                console.log(`📊 Pattern cartelle ${i + 1} ha trovato ${matchCount} match`);
             }
-            
+                
             // Se non troviamo nulla con i pattern, proviamo un approccio più aggressivo
             if (items.length === 0) {
-                console.log('Nessun pattern trovato, provo approccio alternativo...');
+                console.log('🔍 Nessun pattern trovato, provo approccio alternativo...');
                 
-                // Cerca tutti i possibili ID di file/cartelle
-                const allIds = [...html.matchAll(/data-id="([a-zA-Z0-9-_]{20,})"/g)]
-                    .map(match => match[1])
-                    .filter((id, index, self) => self.indexOf(id) === index);
+                // Cerca nel JSON embeddato con pattern specifici per Google Drive
+                console.log(`🔍 Cerca pattern Google Drive nel JSON embeddato...`);
                 
-                console.log(`Trovati ${allIds.length} ID potenziali`);
+                // Pattern per cartelle nel formato Google Drive
+                const folderPatterns = [
+                    // Pattern per array JSON con ID, parent, nome, tipo folder
+                    /\["([a-zA-Z0-9-_]+)",\["[^"]*"\],"([^"]+)","application\/vnd\.google-apps\.folder"/g,
+                    // Pattern alternativo per cartelle
+                    /\["([^"]+)","([a-zA-Z0-9-_]+)","[^"]*","[^"]*","application\/vnd\.google-apps\.folder"/g,
+                    // Pattern per struttura window['_DRIVE_ivd']
+                    /\["([a-zA-Z0-9-_]+)","[^"]*","([^"]+)","application\/vnd\.google-apps\.folder"/g
+                ];
                 
-                // Per ogni ID, prova a determinare se è un file o una cartella
-                for (const id of allIds.slice(0, 10)) { // Limita a 10 per evitare sovraccarico
-                    try {
-                        const itemInfo = await this.getFileInfo(id);
-                        if (itemInfo) {
-                            items.push(itemInfo);
+                for (let i = 0; i < folderPatterns.length; i++) {
+                    const pattern = folderPatterns[i];
+                    console.log(`🔍 Pattern cartelle JSON ${i + 1}: ${pattern}`);
+                    
+                    let folderMatches = [...html.matchAll(pattern)];
+                    console.log(`📊 Pattern ${i + 1} ha trovato ${folderMatches.length} cartelle`);
+                    
+                    for (const folderMatch of folderMatches) {
+                        let id, name;
+                        
+                        // Primo pattern: ID prima del nome
+                        if (i === 0 || i === 2) {
+                            [, id, name] = folderMatch;
+                        } else {
+                            // Secondo pattern: nome prima dell'ID
+                            [, name, id] = folderMatch;
                         }
-                    } catch (error) {
-                        console.log(`Errore nel recupero info per ${id}: ${error.message}`);
+                        
+                        if (id && name && !items.find(item => item.id === id)) {
+                            items.push({
+                                id: id,
+                                name: name.trim(),
+                                type: 'folder',
+                                mimeType: 'application/vnd.google-apps.folder'
+                            });
+                            console.log(`✅ Trovata cartella nel JSON: ${name} (ID: ${id})`);
+                        }
+                    }
+                }
+                
+                // Cerca anche immagini nel JSON
+                console.log(`🔍 Cerca immagini nel JSON embeddato...`);
+                const imagePatterns = [
+                    /\["([a-zA-Z0-9-_]+)",\["[^"]*"\],"([^"]+\.(?:jpg|jpeg|png|gif|bmp|webp))","image\/[^"]*"/gi,
+                    /\["([^"]+\.(?:jpg|jpeg|png|gif|bmp|webp))","([a-zA-Z0-9-_]+)","[^"]*","[^"]*","image\/[^"]*"/gi
+                ];
+                
+                for (let i = 0; i < imagePatterns.length; i++) {
+                    const pattern = imagePatterns[i];
+                    console.log(`🔍 Pattern immagini JSON ${i + 1}: ${pattern}`);
+                    
+                    let imageMatches = [...html.matchAll(pattern)];
+                    console.log(`📊 Pattern ${i + 1} ha trovato ${imageMatches.length} immagini`);
+                    
+                    for (const imageMatch of imageMatches) {
+                        let id, name;
+                        
+                        // Primo pattern: ID prima del nome
+                        if (i === 0) {
+                            [, id, name] = imageMatch;
+                        } else {
+                            // Secondo pattern: nome prima dell'ID
+                            [, name, id] = imageMatch;
+                        }
+                        
+                        if (id && name && !items.find(item => item.id === id)) {
+                            const ext = name.toLowerCase().split('.').pop();
+                            const mimeType = this.getMimeType(ext);
+                            
+                            items.push({
+                                id: id,
+                                name: name.trim(),
+                                type: 'image',
+                                mimeType: mimeType
+                            });
+                            console.log(`✅ Trovata immagine nel JSON: ${name} (ID: ${id})`);
+                        }
+                    }
+                }
+                
+                // Se ancora non troviamo nulla, prova approccio ID
+                if (items.length === 0) {
+                    console.log('🔍 Provo approccio ID...');
+                    
+                    // Cerca tutti i possibili ID di file/cartelle
+                    const allIds = [...html.matchAll(/data-id="([a-zA-Z0-9-_]{20,})"/g)]
+                        .map(match => match[1])
+                        .filter((id, index, self) => self.indexOf(id) === index);
+                    
+                    console.log(`Trovati ${allIds.length} ID potenziali`);
+                    
+                    // Per ogni ID, prova a determinare se è un file o una cartella
+                    for (const id of allIds.slice(0, 10)) { // Limita a 10 per evitare sovraccarico
+                        try {
+                            const itemInfo = await this.getFileInfo(id);
+                            if (itemInfo) {
+                                items.push(itemInfo);
+                            }
+                        } catch (error) {
+                            console.log(`Errore nel recupero info per ${id}: ${error.message}`);
+                        }
                     }
                 }
             }
             
-            console.log(`Totale elementi trovati: ${items.length}`);
+            console.log(`📊 Totale elementi trovati: ${items.length}`);
+            console.log(`   - Immagini: ${items.filter(item => item.type === 'image').length}`);
+            console.log(`   - Cartelle: ${items.filter(item => item.type === 'folder').length}`);
+            
+            if (items.length === 0) {
+                console.log(`❌ Nessun elemento trovato. Possibili cause:`);
+                console.log(`   - La cartella è vuota`);
+                console.log(`   - La cartella non è pubblica`);
+                console.log(`   - I pattern HTML sono cambiati`);
+                console.log(`   - Problema di accesso alla cartella`);
+            }
+            
             return items;
             
         } catch (error) {
-            console.error('Errore nella scansione alternativa:', error.message);
+            console.error('💥 Errore nella scansione alternativa:', error.message);
+            console.error('Stack trace:', error.stack);
             return [];
         }
     }
@@ -273,22 +430,22 @@ class DriveImageProcessor {
         ];
         
         for (const url of urls) {
-            try {
-                const response = await this.session.get(url, {
+        try {
+            const response = await this.session.get(url, {
                     responseType: 'arraybuffer',
                     maxRedirects: 5
-                });
-                
+            });
+            
                 if (response.data && response.data.byteLength > 0) {
-                    return Buffer.from(response.data);
+            return Buffer.from(response.data);
                 }
-            } catch (error) {
+        } catch (error) {
                 console.log(`Tentativo fallito per ${url}: ${error.message}`);
             }
         }
         
         console.error(`Impossibile scaricare l'immagine ${fileId}`);
-        return null;
+            return null;
     }
 
     async convertToWebP(imageBuffer, quality = 80, maxSide = null) {
@@ -352,11 +509,17 @@ class DriveImageProcessor {
     }
 
     async addFolderToZip(zip, folderData, currentPath, quality, maxSide = null) {
+        // Aggiorna cartella corrente
+        conversionProgress.currentFolder = currentPath || 'Root';
+        
         for (const imageInfo of folderData.images) {
+            conversionProgress.currentFile = imageInfo.name;
+            conversionProgress.currentAction = `Scaricando: ${imageInfo.name}`;
             console.log(`Scaricando: ${imageInfo.name}`);
             
             const imageBuffer = await this.downloadImage(imageInfo.id);
             if (imageBuffer) {
+                conversionProgress.currentAction = `Convertendo: ${imageInfo.name}`;
                 const webpBuffer = await this.convertToWebP(imageBuffer, quality, maxSide);
                 if (webpBuffer) {
                     const nameWithoutExt = path.parse(imageInfo.name).name;
@@ -365,6 +528,12 @@ class DriveImageProcessor {
                     const zipPath = currentPath ? `${currentPath}/${webpName}` : webpName;
                     
                     zip.file(zipPath, webpBuffer);
+                    
+                    // Aggiorna progresso
+                    conversionProgress.processedFiles++;
+                    conversionProgress.progress = Math.round((conversionProgress.processedFiles / conversionProgress.totalFiles) * 100);
+                    conversionProgress.currentAction = `Completato: ${webpName} (${conversionProgress.processedFiles}/${conversionProgress.totalFiles})`;
+                    
                     console.log(`Convertito: ${webpName} ${maxSide ? `(ridimensionato a ${maxSide}px)` : ''}`);
                 }
             }
@@ -404,10 +573,16 @@ app.post('/scan-folder', async (req, res) => {
             return res.status(400).json({ error: 'URL non valido' });
         }
         
-        console.log(`Scansione cartella: ${folderId}`);
+        console.log(`🔍 Scansione cartella: ${folderId}`);
+        console.log(`📎 URL originale: ${url}`);
+        
         const folderStructure = await processor.scanFolderRecursive(folderId);
         
         const totalImages = processor.countImages(folderStructure);
+        
+        console.log(`📊 Risultati scansione:`);
+        console.log(`   - Immagini totali: ${totalImages}`);
+        console.log(`   - Struttura:`, JSON.stringify(folderStructure, null, 2));
         
         res.json({
             success: true,
@@ -417,7 +592,7 @@ app.post('/scan-folder', async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Errore nella scansione:', error);
+        console.error('💥 Errore nella scansione:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -430,12 +605,30 @@ app.post('/convert-and-download', async (req, res) => {
             return res.status(400).json({ error: 'folderId richiesto' });
         }
         
-        console.log(`Conversione cartella: ${folderId} (qualità: ${quality}${maxSide ? `, ridimensionamento: ${maxSide}px` : ''})`);
-        const folderStructure = await processor.scanFolderRecursive(folderId);
+        // Inizializza il progresso
+        conversionProgress.isConverting = true;
+        conversionProgress.progress = 0;
+        conversionProgress.currentAction = 'Inizializzazione...';
+        conversionProgress.processedFiles = 0;
+        conversionProgress.currentFile = '';
+        conversionProgress.currentFolder = '';
         
+        console.log(`Conversione cartella: ${folderId} (qualità: ${quality}${maxSide ? `, ridimensionamento: ${maxSide}px` : ''})`);
+        
+        conversionProgress.currentAction = 'Scansione struttura cartelle...';
+        const folderStructure = await processor.scanFolderRecursive(folderId);
+        conversionProgress.totalFiles = processor.countImages(folderStructure);
+        
+        console.log(`📊 Totale immagini da convertire: ${conversionProgress.totalFiles}`);
+        
+        conversionProgress.currentAction = 'Avvio conversione immagini...';
         const zipBuffer = await processor.createZipWithConvertedImages(folderStructure, quality, maxSide);
         
         if (zipBuffer) {
+            conversionProgress.isConverting = false;
+            conversionProgress.progress = 100;
+            conversionProgress.currentAction = 'Conversione completata!';
+            
             res.set({
                 'Content-Type': 'application/zip',
                 'Content-Disposition': 'attachment; filename="converted_images.zip"',
@@ -443,12 +636,28 @@ app.post('/convert-and-download', async (req, res) => {
             });
             
             res.send(zipBuffer);
+            
+            // Reset del progresso dopo invio
+            setTimeout(() => {
+                conversionProgress.isConverting = false;
+                conversionProgress.progress = 0;
+                conversionProgress.currentAction = '';
+                conversionProgress.currentFile = '';
+                conversionProgress.processedFiles = 0;
+                conversionProgress.totalFiles = 0;
+                conversionProgress.currentFolder = '';
+            }, 5000);
+            
         } else {
+            conversionProgress.isConverting = false;
+            conversionProgress.currentAction = 'Errore nella conversione';
             res.status(500).json({ error: 'Errore nella creazione del ZIP' });
         }
         
     } catch (error) {
         console.error('Errore nella conversione:', error);
+        conversionProgress.isConverting = false;
+        conversionProgress.currentAction = `Errore: ${error.message}`;
         res.status(500).json({ error: error.message });
     }
 });

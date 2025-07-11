@@ -1,38 +1,51 @@
 class JPGtoWEBPConverter {
     constructor() {
+        console.log('🚀 Inizializzazione JPGtoWEBPConverter...');
         this.baseUrl = window.location.hostname === 'localhost' 
             ? 'http://localhost:5001' 
             : '/api';
+        console.log('🌐 Base URL:', this.baseUrl);
         this.currentStep = 1;
         this.scanData = null;
         this.init();
     }
 
     init() {
+        console.log('🔧 Inizializzazione componenti...');
         this.setupEventListeners();
         this.updateStepVisibility();
+        console.log('✅ Inizializzazione completata');
     }
 
     setupEventListeners() {
+        console.log('👂 Configurazione event listeners...');
+        
         // Enter key nel campo URL
         document.getElementById('driveUrl').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
+                console.log('⌨️ Pressione Enter nel campo URL');
                 this.scanFolder();
             }
         });
 
         // Aggiornamento qualità in tempo reale
         document.getElementById('quality').addEventListener('change', (e) => {
+            console.log('🎚️ Cambio qualità:', e.target.value);
             this.updateQualityPreview();
         });
 
         // Aggiornamento dimensioni in tempo reale
         document.getElementById('maxSide').addEventListener('input', (e) => {
+            console.log('📏 Cambio dimensioni:', e.target.value);
             this.updateSizePreview();
         });
+        
+        console.log('✅ Event listeners configurati');
     }
 
     updateStepVisibility() {
+        console.log('👁️ Aggiornamento visibilità step:', this.currentStep);
+        
         // Nascondi tutti i contenuti
         document.querySelectorAll('.step-content').forEach(content => {
             content.classList.remove('active');
@@ -44,21 +57,23 @@ class JPGtoWEBPConverter {
         // Aggiorna indicatori step
         document.querySelectorAll('.step').forEach((step, index) => {
             step.classList.remove('active', 'completed');
-            
+        
             if (index + 1 === this.currentStep) {
                 step.classList.add('active');
             } else if (index + 1 < this.currentStep) {
                 step.classList.add('completed');
-            }
+        }
         });
     }
 
     goToStep(step) {
+        console.log('🚶 Passaggio al step:', step);
         this.currentStep = step;
         this.updateStepVisibility();
     }
 
     showAlert(message, type = 'info') {
+        console.log(`🚨 Alert [${type}]:`, message);
         const alerts = document.querySelectorAll('.alert');
         alerts.forEach(alert => {
             alert.textContent = message;
@@ -67,6 +82,7 @@ class JPGtoWEBPConverter {
     }
 
     updateProgress(percentage, text) {
+        console.log(`📊 Progresso: ${percentage}% - ${text}`);
         const progressFill = document.getElementById('progressFill');
         const progressText = document.getElementById('progressText');
         
@@ -75,14 +91,18 @@ class JPGtoWEBPConverter {
     }
 
     async scanFolder() {
+        console.log('🔍 Inizio scansione cartella...');
         const url = document.getElementById('driveUrl').value.trim();
+        console.log('📎 URL inserito:', url);
         
         if (!url) {
+            console.warn('❌ URL vuoto');
             this.showAlert('Inserisci un URL valido della cartella Google Drive', 'error');
             return;
         }
 
         if (!this.isValidGoogleDriveUrl(url)) {
+            console.warn('❌ URL non valido:', url);
             this.showAlert('URL non valido. Deve essere un link di Google Drive.', 'error');
             return;
         }
@@ -91,9 +111,11 @@ class JPGtoWEBPConverter {
         const originalText = scanBtn.textContent;
         
         try {
+            console.log('🔄 Avvio richiesta al backend...');
             // Disabilita il pulsante e mostra loading
             scanBtn.textContent = '🔍 Scansione...';
-            
+
+            console.log('📡 Invio richiesta POST a:', `${this.baseUrl}/scan-folder`);
             const response = await fetch(`${this.baseUrl}/scan-folder`, {
                 method: 'POST',
                 headers: {
@@ -102,13 +124,16 @@ class JPGtoWEBPConverter {
                 body: JSON.stringify({ url })
             });
 
+            console.log('📥 Risposta ricevuta:', response.status, response.statusText);
             const data = await response.json();
+            console.log('📋 Dati ricevuti:', data);
 
             if (!response.ok) {
                 throw new Error(data.error || `HTTP ${response.status}: ${data.message || 'Errore sconosciuto'}`);
             }
-
+            
             if (data.success) {
+                console.log('✅ Scansione completata con successo');
                 this.scanData = data;
                 this.displayScanResults(data);
                 this.goToStep(2);
@@ -117,9 +142,11 @@ class JPGtoWEBPConverter {
             }
 
         } catch (error) {
-            console.error('Errore:', error);
+            console.error('💥 Errore durante la scansione:', error);
+            console.error('Stack trace:', error.stack);
             this.showAlert(this.getErrorMessage(error), 'error');
         } finally {
+            console.log('🔄 Reset pulsante scansione');
             scanBtn.textContent = originalText;
         }
     }
@@ -224,7 +251,10 @@ class JPGtoWEBPConverter {
         const maxSide = parseInt(document.getElementById('maxSide').value);
 
         try {
-            const response = await fetch(`${this.baseUrl}/convert-and-download`, {
+            console.log('🚀 Avvio conversione...');
+            
+            // Avvia la conversione (non aspettiamo la risposta)
+            const conversionPromise = fetch(`${this.baseUrl}/convert-and-download`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -236,13 +266,46 @@ class JPGtoWEBPConverter {
                 })
             });
 
+            // Monitora il progresso in tempo reale
+            const progressInterval = setInterval(async () => {
+                try {
+                    const progressResponse = await fetch(`${this.baseUrl}/convert-progress`);
+                    const progressData = await progressResponse.json();
+                    
+                    console.log('📊 Progresso ricevuto:', progressData);
+                    
+                    if (progressData.isConverting) {
+                        // Aggiorna UI con dati dettagliati
+                        let detailText = progressData.currentAction;
+                        if (progressData.currentFile) {
+                            detailText += ` - ${progressData.currentFile}`;
+                        }
+                        if (progressData.currentFolder) {
+                            detailText += ` in ${progressData.currentFolder}`;
+                        }
+                        if (progressData.processedFiles > 0) {
+                            detailText += ` (${progressData.processedFiles}/${progressData.totalFiles})`;
+                        }
+                        
+                        this.updateProgress(progressData.progress, detailText);
+                    } else if (progressData.progress === 100) {
+                        // Conversione completata
+                        clearInterval(progressInterval);
+                        this.updateProgress(100, 'Conversione completata! Preparazione download...');
+                    }
+                } catch (err) {
+                    console.log('❌ Errore nel monitoraggio progresso:', err);
+                }
+            }, 1000);
+
+            // Aspetta il completamento della conversione
+            const response = await conversionPromise;
+            clearInterval(progressInterval);
+
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || 'Errore durante la conversione');
             }
-
-            // Simula progresso (poiché il download è immediato)
-            await this.simulateProgress();
 
             // Gestisci download
             const blob = await response.blob();
@@ -253,28 +316,16 @@ class JPGtoWEBPConverter {
             downloadBtn.download = `converted_images_${Date.now()}.zip`;
             
             document.getElementById('downloadSection').style.display = 'block';
+            this.updateProgress(100, 'Conversione completata con successo!');
             this.showAlert('Conversione completata con successo!', 'success');
 
         } catch (error) {
-            console.error('Errore conversione:', error);
+            console.error('💥 Errore conversione:', error);
             this.showAlert(this.getErrorMessage(error), 'error');
         }
     }
 
-    async simulateProgress() {
-        const steps = [
-            { progress: 10, text: 'Downloading immagini...' },
-            { progress: 30, text: 'Ridimensionamento immagini...' },
-            { progress: 60, text: 'Conversione in WEBP...' },
-            { progress: 85, text: 'Creazione archivio ZIP...' },
-            { progress: 100, text: 'Completato!' }
-        ];
 
-        for (const step of steps) {
-            await new Promise(resolve => setTimeout(resolve, 800));
-            this.updateProgress(step.progress, step.text);
-        }
-    }
 
     updateQualityPreview() {
         const quality = document.getElementById('quality').value;
@@ -307,6 +358,16 @@ class JPGtoWEBPConverter {
         
         this.updateProgress(0, 'Preparazione...');
         this.updateStepVisibility();
+    }
+
+    showFileList() {
+        document.getElementById('fileListModal').style.display = 'flex';
+        console.log('📁 Modale file list aperta');
+    }
+
+    hideFileList() {
+        document.getElementById('fileListModal').style.display = 'none';
+        console.log('📁 Modale file list chiusa');
     }
 }
 

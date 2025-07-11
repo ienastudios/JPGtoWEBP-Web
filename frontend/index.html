@@ -494,11 +494,111 @@
             text-shadow: 0 2px 4px rgba(139, 92, 246, 0.3);
         }
 
+        /* Stili per la modale */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+            animation: slideIn 0.3s ease;
+        }
+
+        .modal-header {
+            background: linear-gradient(135deg, #8B5CF6 0%, #A855F7 100%);
+            color: white;
+            padding: 20px 30px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+        }
+
+        .modal-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-body {
+            padding: 30px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .folder-tree {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .folder-item {
+            padding: 5px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .folder-item.folder {
+            font-weight: 600;
+            color: #8B5CF6;
+        }
+
+        .folder-item.image {
+            color: #64748B;
+            font-size: 13px;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
         @media (max-width: 768px) {
             .settings-grid {
                 grid-template-columns: 1fr;
-            }
-            
+        }
+
             .stats {
                 grid-template-columns: 1fr;
             }
@@ -506,14 +606,23 @@
             .steps {
                 flex-direction: column;
                 gap: 15px;
-            }
+        }
 
             .step {
                 justify-content: center;
-            }
+        }
 
             .content {
                 padding: 30px;
+            }
+
+            .modal-content {
+                width: 95%;
+                max-height: 85vh;
+            }
+
+            .modal-body {
+                padding: 20px;
             }
         }
     </style>
@@ -543,14 +652,14 @@
         <div class="content">
             <!-- Step 1: Link Input -->
             <div class="step-content active" id="step1">
-                <div class="form-group">
+            <div class="form-group">
                     <label for="driveUrl">URL cartella Google Drive</label>
-                    <input 
-                        type="url" 
-                        id="driveUrl" 
-                        placeholder="https://drive.google.com/drive/folders/..."
-                        required
-                    >
+                <input 
+                    type="url" 
+                    id="driveUrl" 
+                    placeholder="https://drive.google.com/drive/folders/..."
+                    required
+                >
                     <div class="help-text">
                         Assicurati che la cartella sia pubblica (condivisa con "chiunque abbia il link")
                     </div>
@@ -579,11 +688,13 @@
                             <div class="stat-label">Dimensione</div>
                         </div>
                     </div>
-                    <div class="folder-tree" id="folderTree"></div>
+                    <button class="btn-secondary" onclick="app.showFileList()" style="margin-top: 15px;">
+                        📁 Visualizza Elenco Cartelle e File
+                    </button>
                 </div>
 
                 <div class="settings-grid">
-                    <div class="form-group">
+            <div class="form-group">
                         <label for="maxSide">Lato lungo (px)</label>
                         <input 
                             type="number" 
@@ -641,13 +752,27 @@
                 <div class="navigation">
                     <button class="btn-nav btn-secondary" onclick="app.restart()">
                         🔄 Nuova Conversione
-                    </button>
-                </div>
+                </button>
+            </div>
             </div>
         </div>
-        
+
         <div class="credits">
             <p>Realizzato da <a href="https://guacamole.team" target="_blank">Fabio Scalia</a></p>
+            <p style="margin-top: 10px; font-size: 12px; opacity: 0.7;">Versione 1.2</p>
+        </div>
+    </div>
+
+    <!-- Modale per l'elenco delle cartelle -->
+    <div class="modal" id="fileListModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📁 Struttura Cartelle e File</h3>
+                <button class="modal-close" onclick="app.hideFileList()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="folder-tree" id="folderTree"></div>
+            </div>
         </div>
     </div>
 
