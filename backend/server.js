@@ -514,12 +514,12 @@ class DriveImageProcessor {
         
         for (const imageInfo of folderData.images) {
             conversionProgress.currentFile = imageInfo.name;
-            conversionProgress.currentAction = `Scaricando: ${imageInfo.name}`;
+            conversionProgress.currentAction = `Scaricando`;
             console.log(`Scaricando: ${imageInfo.name}`);
             
             const imageBuffer = await this.downloadImage(imageInfo.id);
             if (imageBuffer) {
-                conversionProgress.currentAction = `Convertendo: ${imageInfo.name}`;
+                conversionProgress.currentAction = `Convertendo`;
                 const webpBuffer = await this.convertToWebP(imageBuffer, quality, maxSide);
                 if (webpBuffer) {
                     const nameWithoutExt = path.parse(imageInfo.name).name;
@@ -532,7 +532,7 @@ class DriveImageProcessor {
                     // Aggiorna progresso
                     conversionProgress.processedFiles++;
                     conversionProgress.progress = Math.round((conversionProgress.processedFiles / conversionProgress.totalFiles) * 100);
-                    conversionProgress.currentAction = `Completato: ${webpName} (${conversionProgress.processedFiles}/${conversionProgress.totalFiles})`;
+                    conversionProgress.currentAction = `Completato`;
                     
                     console.log(`Convertito: ${webpName} ${maxSide ? `(ridimensionato a ${maxSide}px)` : ''}`);
                 }
