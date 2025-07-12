@@ -1,24 +1,32 @@
 #!/bin/bash
 
-echo "�� Avvio JPG to WEBP Converter - Web Version"
+echo "🚀 Avvio JPG to WEBP Converter - Web Version"
 echo "=============================================="
 
-# Controlla se Python è installato
+# Controlla se Node.js è installato
+if ! command -v node &> /dev/null; then
+    echo "❌ Node.js non trovato. Installalo prima di continuare."
+    exit 1
+fi
+
+# Controlla se Python è installato per il frontend
 if ! command -v python3 &> /dev/null; then
     echo "❌ Python 3 non trovato. Installalo prima di continuare."
     exit 1
 fi
 
-# Installa le dipendenze se necessario
-echo "📦 Installazione dipendenze..."
+# Installa le dipendenze Node.js se necessario
+echo "📦 Installazione dipendenze Node.js..."
 cd backend
-pip3 install -r requirements.txt
+if [ ! -d "node_modules" ]; then
+    npm install
+fi
 cd ..
 
-# Avvia il backend in background
-echo "🔧 Avvio backend Flask..."
+# Avvia il backend Node.js in background
+echo "🔧 Avvio backend Node.js..."
 cd backend
-python3 app.py &
+node server.js &
 BACKEND_PID=$!
 cd ..
 
@@ -27,7 +35,7 @@ echo "⏳ Attendo che il backend sia pronto..."
 sleep 5
 
 # Controlla se il backend è attivo
-if curl -s http://localhost:5000/health > /dev/null; then
+if curl -s http://localhost:5001/health > /dev/null; then
     echo "✅ Backend pronto!"
 else
     echo "❌ Errore nell'avvio del backend"
@@ -49,7 +57,7 @@ sleep 3
 echo ""
 echo "🎉 Applicazione avviata con successo!"
 echo "📱 Frontend: http://localhost:8080"
-echo "🔧 Backend:  http://localhost:5000"
+echo "🔧 Backend:  http://localhost:5001"
 echo ""
 echo "🌐 Apri il browser su http://localhost:8080 per iniziare"
 echo ""

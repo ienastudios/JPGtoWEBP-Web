@@ -514,61 +514,86 @@ class DriveImageProcessor {
     async createMultipleZips(folderStructure, quality = 80, maxSide = null) {
         const zipList = [];
         
-        // Se ci sono immagini nella root, crea un ZIP separato
-        if (folderStructure.images && folderStructure.images.length > 0) {
-            const rootZip = new JSZip();
-            const rootFolder = { images: folderStructure.images, folders: {} };
-            await this.addFolderToZip(rootZip, rootFolder, '', quality, maxSide);
+        try {
+            console.log(`🔄 Inizio creazione ZIP multipli. Struttura:`, Object.keys(folderStructure.folders));
             
-            const zipBuffer = await rootZip.generateAsync({
-                type: 'nodebuffer',
-                compression: 'DEFLATE',
-                compressionOptions: { level: 6 }
-            });
+            // Se ci sono immagini nella root, crea un ZIP separato
+            if (folderStructure.images && folderStructure.images.length > 0) {
+                console.log(`🗂️ Creando ZIP per immagini root (${folderStructure.images.length} immagini)`);
+                
+                try {
+                    const rootZip = new JSZip();
+                    const rootFolder = { images: folderStructure.images, folders: {} };
+                    await this.addFolderToZip(rootZip, rootFolder, '', quality, maxSide);
+                    
+                    const zipBuffer = await rootZip.generateAsync({
+                        type: 'nodebuffer',
+                        compression: 'DEFLATE',
+                        compressionOptions: { level: 6 }
+                    });
+                    
+                    zipList.push({
+                        name: 'Root_Images.zip',
+                        buffer: zipBuffer,
+                        size: zipBuffer.length,
+                        imageCount: folderStructure.images.length
+                    });
+                    
+                    console.log(`✅ ZIP root creato con successo: ${(zipBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+                } catch (error) {
+                    console.error(`💥 Errore nella creazione ZIP root:`, error);
+                    throw new Error(`Errore nel creare ZIP per immagini root: ${error.message}`);
+                }
+            }
             
-            zipList.push({
-                name: 'Root_Images.zip',
-                buffer: zipBuffer,
-                size: zipBuffer.length,
-                imageCount: folderStructure.images.length
-            });
+            // Crea un ZIP per ogni cartella principale
+            let zipIndex = 0;
+            const totalFolders = Object.keys(folderStructure.folders).length;
+            
+            for (const [folderName, folderData] of Object.entries(folderStructure.folders)) {
+                zipIndex++;
+                console.log(`🗂️ Creando ZIP ${zipIndex}/${totalFolders}: ${folderName}`);
+                
+                try {
+                    conversionProgress.currentAction = `Creando ZIP: ${folderName}`;
+                    conversionProgress.currentFolder = folderName;
+                    
+                    const zip = new JSZip();
+                    await this.addFolderToZip(zip, folderData, '', quality, maxSide);
+                    
+                    const zipBuffer = await zip.generateAsync({
+                        type: 'nodebuffer',
+                        compression: 'DEFLATE',
+                        compressionOptions: { level: 6 }
+                    });
+                    
+                    const imageCount = this.countImages(folderData);
+                    const sanitizedName = folderName.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    
+                    zipList.push({
+                        name: `${sanitizedName}.zip`,
+                        buffer: zipBuffer,
+                        size: zipBuffer.length,
+                        imageCount: imageCount
+                    });
+                    
+                    conversionProgress.processedZips++;
+                    conversionProgress.progress = Math.round((conversionProgress.processedZips / conversionProgress.totalZips) * 100);
+                    
+                    console.log(`✅ ZIP creato: ${sanitizedName}.zip (${imageCount} immagini, ${(zipBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
+                } catch (error) {
+                    console.error(`💥 Errore nella creazione ZIP per cartella ${folderName}:`, error);
+                    throw new Error(`Errore nel creare ZIP per cartella "${folderName}": ${error.message}`);
+                }
+            }
+            
+            console.log(`🎉 Creazione ZIP multipli completata! ${zipList.length} ZIP creati in totale`);
+            return zipList;
+            
+        } catch (error) {
+            console.error('💥 Errore generale nella creazione ZIP multipli:', error);
+            throw new Error(`Errore nella creazione ZIP multipli: ${error.message}`);
         }
-        
-        // Crea un ZIP per ogni cartella principale
-        let zipIndex = 0;
-        for (const [folderName, folderData] of Object.entries(folderStructure.folders)) {
-            zipIndex++;
-            console.log(`🗂️ Creando ZIP ${zipIndex}/${conversionProgress.totalZips}: ${folderName}`);
-            
-            conversionProgress.currentAction = `Creando ZIP: ${folderName}`;
-            conversionProgress.currentFolder = folderName;
-            
-            const zip = new JSZip();
-            await this.addFolderToZip(zip, folderData, '', quality, maxSide);
-            
-            const zipBuffer = await zip.generateAsync({
-                type: 'nodebuffer',
-                compression: 'DEFLATE',
-                compressionOptions: { level: 6 }
-            });
-            
-            const imageCount = this.countImages(folderData);
-            const sanitizedName = folderName.replace(/[^a-zA-Z0-9_-]/g, '_');
-            
-            zipList.push({
-                name: `${sanitizedName}.zip`,
-                buffer: zipBuffer,
-                size: zipBuffer.length,
-                imageCount: imageCount
-            });
-            
-            conversionProgress.processedZips++;
-            conversionProgress.progress = Math.round((conversionProgress.processedZips / conversionProgress.totalZips) * 100);
-            
-            console.log(`✅ ZIP creato: ${sanitizedName}.zip (${imageCount} immagini, ${(zipBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
-        }
-        
-        return zipList;
     }
 
     async addFolderToZip(zip, folderData, currentPath, quality, maxSide = null) {
@@ -734,6 +759,8 @@ app.post('/convert-multiple-zip', async (req, res) => {
             return res.status(400).json({ error: 'folderId richiesto' });
         }
         
+        console.log(`🔄 Inizio conversione multipla ZIP - folderId: ${folderId}, qualità: ${quality}, maxSide: ${maxSide}`);
+        
         // Reset progresso per conversione multipla
         conversionProgress = {
             isConverting: true,
@@ -751,8 +778,23 @@ app.post('/convert-multiple-zip', async (req, res) => {
         console.log(`🔄 Conversione multipla ZIP: ${folderId} (qualità: ${quality}${maxSide ? `, ridimensionamento: ${maxSide}px` : ''})`);
         
         // Scansiona struttura
+        console.log('📁 Inizio scansione struttura cartelle...');
         conversionProgress.currentAction = 'Scansione struttura cartelle...';
-        const folderStructure = await processor.scanFolderRecursive(folderId);
+        
+        let folderStructure;
+        try {
+            folderStructure = await processor.scanFolderRecursive(folderId);
+            console.log(`✅ Scansione completata. Struttura:`, {
+                images: folderStructure.images ? folderStructure.images.length : 0,
+                folders: Object.keys(folderStructure.folders).length
+            });
+        } catch (error) {
+            console.error('💥 Errore durante la scansione:', error);
+            conversionProgress.isConverting = false;
+            conversionProgress.currentAction = `Errore scansione: ${error.message}`;
+            return res.status(500).json({ error: `Errore durante la scansione: ${error.message}` });
+        }
+        
         conversionProgress.totalFiles = processor.countImages(folderStructure);
         
         // Calcola numero di ZIP da creare
@@ -763,9 +805,27 @@ app.post('/convert-multiple-zip', async (req, res) => {
         
         console.log(`📊 Totale immagini: ${conversionProgress.totalFiles}, ZIP da creare: ${conversionProgress.totalZips}`);
         
+        if (conversionProgress.totalFiles === 0) {
+            console.log('⚠️ Nessuna immagine trovata nella cartella');
+            conversionProgress.isConverting = false;
+            conversionProgress.currentAction = 'Nessuna immagine trovata';
+            return res.status(400).json({ error: 'Nessuna immagine trovata nella cartella specificata' });
+        }
+        
         // Avvia conversione multipla
+        console.log('🔄 Inizio creazione ZIP multipli...');
         conversionProgress.currentAction = 'Creazione ZIP multipli...';
-        const zipList = await processor.createMultipleZips(folderStructure, quality, maxSide);
+        
+        let zipList;
+        try {
+            zipList = await processor.createMultipleZips(folderStructure, quality, maxSide);
+            console.log(`✅ Creazione ZIP multipli completata! ${zipList.length} ZIP creati.`);
+        } catch (error) {
+            console.error('💥 Errore durante la creazione ZIP multipli:', error);
+            conversionProgress.isConverting = false;
+            conversionProgress.currentAction = `Errore creazione ZIP: ${error.message}`;
+            return res.status(500).json({ error: `Errore durante la creazione ZIP: ${error.message}` });
+        }
         
         conversionProgress.isConverting = false;
         conversionProgress.progress = 100;
@@ -790,10 +850,10 @@ app.post('/convert-multiple-zip', async (req, res) => {
         console.log(`🎉 Conversione multipla completata! ${zipList.length} ZIP creati.`);
         
     } catch (error) {
-        console.error('💥 Errore nella conversione multipla:', error);
+        console.error('💥 Errore generale nella conversione multipla:', error);
         conversionProgress.isConverting = false;
-        conversionProgress.currentAction = `Errore: ${error.message}`;
-        res.status(500).json({ error: error.message });
+        conversionProgress.currentAction = `Errore generale: ${error.message}`;
+        res.status(500).json({ error: `Errore generale: ${error.message}` });
     }
 });
 

@@ -312,7 +312,15 @@ class JPGtoWEBPConverter {
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error('💥 Errore risposta server:', errorText);
-                throw new Error('Errore durante la conversione multipla');
+                
+                // Prova a parsare come JSON per ottenere un messaggio di errore più specifico
+                try {
+                    const errorData = JSON.parse(errorText);
+                    throw new Error(`Errore server: ${errorData.error || errorText}`);
+                } catch (parseError) {
+                    // Se non è JSON, usa il testo dell'errore direttamente
+                    throw new Error(`Errore server: ${errorText}`);
+                }
             }
 
             const result = await response.json();
